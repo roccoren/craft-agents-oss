@@ -121,7 +121,7 @@ describe('TeamsAdapter HTTP path', () => {
     const res = {
       statusCode: 0,
       setHeader() {},
-      end() { status = this.statusCode; ended = true },
+      end() { status = res.statusCode; ended = true },
       get writableEnded() { return ended },
     } as unknown as import('node:http').ServerResponse
     return { req, res, getStatus: () => status }
