@@ -40,4 +40,18 @@ describe('DevTunnelProvider', () => {
     setTimeout(() => { fakeChild.emit('exit', 1) }, 10)
     await expect(started).rejects.toThrow(/devtunnel exited/)
   })
+
+  it('includes the real stderr text in the rejection instead of a hardcoded guess', async () => {
+    const fakeChild = Object.assign(new EventEmitter(), {
+      stdout: new EventEmitter(), stderr: new EventEmitter(), kill: () => {},
+    })
+    const spawnImpl = (() => fakeChild) as unknown as typeof import('node:child_process').spawn
+    const p = new DevTunnelProvider({ binPath: '/fake/devtunnel', tunnelId: 't1', spawnImpl })
+    const started = p.start(3978)
+    setTimeout(() => {
+      fakeChild.stderr.emit('data', Buffer.from('Error: port 3978 is already forwarded on this tunnel\n'))
+      fakeChild.emit('exit', 1)
+    }, 10)
+    await expect(started).rejects.toThrow(/port 3978 is already forwarded/)
+  })
 })

@@ -44,6 +44,7 @@ export class DevTunnelProvider implements TunnelProvider {
     this.proc = proc
 
     return new Promise((resolve, reject) => {
+      let stderr = ''
       const onData = (chunk: Buffer) => {
         for (const line of chunk.toString('utf8').split('\n')) {
           const url = parseTunnelUrl(line)
@@ -55,10 +56,20 @@ export class DevTunnelProvider implements TunnelProvider {
         }
       }
       proc.stdout?.on('data', onData)
+      proc.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8') })
       proc.on('exit', (code) => {
         this.proc = null
         if (!this.stopping && !this.publicUrl) {
-          reject(new Error(`devtunnel exited (${code}). Run "devtunnel user login" first.`))
+          // Surface the CLI's own stderr instead of guessing why it failed —
+          // a hardcoded "run devtunnel user login" message was actively
+          // misleading when the real cause was unrelated (e.g. an argument
+          // or port-forwarding error), and the user had already logged in.
+          const detail = stderr.trim()
+          reject(new Error(
+            detail
+              ? `devtunnel exited (${code}): ${detail}`
+              : `devtunnel exited (${code}) with no output. If this persists, try "devtunnel user login".`,
+          ))
         }
       })
       proc.on('error', reject)
