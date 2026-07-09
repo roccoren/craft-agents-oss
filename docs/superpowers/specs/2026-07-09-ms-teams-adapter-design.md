@@ -36,9 +36,11 @@ Consequences that drive the whole design:
 1. **No subprocess worker.** Unlike Discord/WhatsApp (isolated because of native
    deps and persistent sockets), the `botbuilder` SDK is pure JS with no native
    modules and no persistent connection. The adapter runs **in-process**.
-2. **A public URL is required.** We provide it with a bundled **Azure Dev
-   Tunnels** persistent tunnel (stable URL) by default, or a user-supplied
-   **bring-your-own** stable HTTPS URL.
+2. **A public URL is required.** We provide it with an **Azure Dev Tunnels**
+   persistent tunnel (stable URL) by default, or a user-supplied
+   **bring-your-own** stable HTTPS URL. The `devtunnel` binary is **not shipped
+   in the app package** — it is provisioned on demand (downloaded and cached the
+   first time a user actually connects Teams with the devtunnel mode).
 3. **Replies are proactive.** The Router replies asynchronously, outside the
    inbound HTTP turn, so the adapter stores a `ConversationReference` per
    conversation and sends later via `continueConversationAsync`.
@@ -48,8 +50,9 @@ Consequences that drive the whole design:
 1. **Integration:** Bot Framework / Azure Bot Service (bidirectional bot).
 2. **Runtime:** In-process adapter; **no** worker subprocess.
 3. **Deployment:** Desktop-first with a bundled tunnel, and headless-capable.
-4. **Tunnel:** Bundle **Azure Dev Tunnels** (`devtunnel`) with a **persistent
-   (stable-URL) tunnel** as the default; also allow **BYO URL** override.
+4. **Tunnel:** **Azure Dev Tunnels** (`devtunnel`) with a **persistent
+   (stable-URL) tunnel** as the default, **provisioned on demand** (downloaded +
+   cached on first use, not bundled); also allow **BYO URL** override.
 5. **Auth:** Microsoft App ID + App Password, **optional** Tenant ID. Tenant
    present ⇒ single-tenant app; absent ⇒ multi-tenant. Stored in the
    `messaging_bearer` credential row (`name = 'teams'`).
@@ -119,10 +122,39 @@ interface TunnelProvider {
 - `DevTunnelProvider` — spawns `devtunnel host <tunnelId> --allow-anonymous`
   (persistent tunnel ⇒ **stable URL**), parses the public URL from stdout, keeps
   the process alive, restarts on unexpected exit. Requires a one-time
-  `devtunnel user login` (Microsoft/GitHub); the binary is bundled via
-  `extraResources`. The persistent tunnel id is stored in the workspace config.
+  `devtunnel user login` (Microsoft/GitHub). The persistent tunnel id is stored
+  in the workspace config. The binary path comes from the on-demand
+  `DevTunnelBinaryProvisioner` (below), not from the app bundle.
 - `ByoTunnelProvider` — no child process; returns the user-supplied stable HTTPS
   base URL as `publicUrl`.
+
+### On-demand binary provisioning: `DevTunnelBinaryProvisioner`
+
+The `devtunnel` CLI is fetched lazily the first time a user connects Teams in
+`devtunnel` mode — a "hot-attached" component with **zero app-package size
+cost**. Interface:
+
+```ts
+interface DevTunnelBinaryProvisioner {
+  ensure(): Promise<string> // resolves to an executable devtunnel path
+}
+```
+
+Behaviour:
+
+1. Resolve the runtime RID from `process.platform` + `process.arch`:
+   `win32/x64 → win-x64`, `darwin/arm64 → osx-arm64-zip`,
+   `darwin/x64 → osx-x64-zip`, `linux/x64 → linux-x64`.
+2. Check the cache at `<userData>/devtunnel/<rid>/devtunnel[.exe]`. If present
+   (and, optionally, matches a pinned version marker), return it.
+3. Otherwise download from Microsoft's official distribution
+   `https://aka.ms/TunnelsCliDownload/<rid>`, extract if it is a zip (macOS),
+   `chmod +x` on POSIX, write a version marker, and return the path.
+4. On download failure (offline, blocked) reject with a clear error; the connect
+   flow surfaces it and the user can fall back to **BYO URL**.
+
+The download happens once per machine and is progress-reported to the connect
+dialog. A user who only ever uses BYO URL never triggers a download.
 
 The messaging endpoint shown to the user is `<publicUrl>/api/messages`; they
 paste it into the Azure Bot resource's "Messaging endpoint" once. With a
@@ -202,7 +234,7 @@ inside `adapter.continueConversationAsync(appId, ref, async ctx => …)`:
 ### `registry.ts`
 
 - `WorkspaceState` += `teams: TeamsAdapter | null` (+ any tunnel handle needed).
-- `MessagingGatewayRegistryOptions` += `teams?: { devtunnelBin?: string;
+- `MessagingGatewayRegistryOptions` += `teams?: { devtunnelCacheDir?: string;
   localPort?: number }`.
 - New: `testTeamsCredentials`, `saveTeamsCredentials`, `connectTeams` /
   `tryConnectTeams`, `parseTeamsCredentials`.
@@ -221,9 +253,9 @@ inside `adapter.continueConversationAsync(appId, ref, async ctx => …)`:
 
 ### Electron `main/index.ts` + `electron-builder.yml`
 
-- Provide `teams.devtunnelBin` (dev: repo-local vendored binary or PATH lookup;
-  packaged: `resourcesPath/devtunnel/devtunnel[.exe]`) and a local webhook port.
-- Add the `devtunnel` binary to `extraResources` (per-platform).
+- Provide `teams.devtunnelCacheDir` (`<userData>/devtunnel`) and a local webhook
+  port. **No** `extraResources` bundling — the `DevTunnelBinaryProvisioner`
+  downloads and caches the binary on demand at connect time.
 - Start/stop the tunnel with the adapter lifecycle.
 
 ### Trigger filter
@@ -287,8 +319,10 @@ inside `adapter.continueConversationAsync(appId, ref, async ctx => …)`:
 - Invalid credentials → `testTeamsCredentials` token request fails → dialog error.
 - Missing / mis-set Azure messaging endpoint → inbound never arrives; the UI
   shows the exact endpoint to paste and a "waiting for first message" hint.
-- `devtunnel` not logged in / not installed → `TunnelProvider.start` rejects →
-  runtime `error` + dialog prompt to run `devtunnel user login`.
+- `devtunnel` not installed → **provisioner downloads it on demand**; a download
+  failure (offline/blocked) → runtime `error` + dialog prompt to retry or switch
+  to BYO URL. `devtunnel` not logged in → `TunnelProvider.start` rejects →
+  dialog prompt to run `devtunnel user login`.
 - Tunnel process exit → auto-restart with backoff; persistent tunnel keeps the
   same URL, so no Azure re-config needed.
 - Proactive send with no stored `ConversationReference` (bot never saw the
@@ -303,7 +337,9 @@ inside `adapter.continueConversationAsync(appId, ref, async ctx => …)`:
 - format: `format.test.ts` — Markdown → Teams text + Adaptive Card button card.
 - tunnel: `tunnel.test.ts` — `ByoTunnelProvider` returns the URL as-is;
   `DevTunnelProvider` parses the public URL from mocked spawn stdout and
-  restarts on exit.
+  restarts on exit; `DevTunnelBinaryProvisioner` resolves the RID, returns a
+  cached path without downloading, and downloads via a mocked fetch when the
+  cache is empty.
 - credentials: `testTeamsCredentials` against a mocked token endpoint
   (single-tenant vs multi-tenant authority selection).
 - No network, no real Azure Bot, no real tunnel.
@@ -318,8 +354,9 @@ inside `adapter.continueConversationAsync(appId, ref, async ctx => …)`:
 1. **Core adapter + BYO URL + wiring + UI** — personal chat, text/edit/typing/
    Adaptive-Card buttons, credentials, registry + protocol + server-core + UI +
    i18n + docs. Works headless and desktop when the user supplies a stable URL.
-2. **Bundled `devtunnel` persistent tunnel** — `DevTunnelProvider`, binary
-   bundling, lifecycle wiring, dialog tunnel-mode UI.
+2. **On-demand `devtunnel` persistent tunnel** — `DevTunnelBinaryProvisioner`
+   (lazy download + cache), `DevTunnelProvider`, lifecycle wiring, dialog
+   tunnel-mode UI with download progress.
 3. **Channel + group surfaces** — `teamsChannelTrigger`, mention detection,
    binding UI copy.
 
