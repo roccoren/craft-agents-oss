@@ -18,6 +18,14 @@ export {
   type DiscordCredentials,
   type DiscordEvent,
 } from './adapters/discord/index'
+export {
+  TeamsAdapter,
+  parseTeamsCredentials,
+  testTeamsCredentials,
+  type TeamsConfig,
+  type TeamsCredentials,
+  type TeamsEvent,
+} from './adapters/teams/index'
 export { BindingStore } from './binding-store'
 export { ConfigStore } from './config-store'
 export { PairingCodeManager, PAIRING_TTL_MS, PAIRING_RATE_LIMIT_PER_MINUTE } from './pairing'

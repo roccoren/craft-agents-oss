@@ -31,6 +31,14 @@ import { TelegramAdapter } from './adapters/telegram/index'
 import { WhatsAppAdapter, type WhatsAppEvent } from './adapters/whatsapp/index'
 import { LarkAdapter, parseLarkCredentials, type LarkCredentials } from './adapters/lark/index'
 import { DiscordAdapter, parseDiscordCredentials, type DiscordCredentials, type DiscordEvent } from './adapters/discord/index'
+import {
+  TeamsAdapter,
+  parseTeamsCredentials,
+  testTeamsCredentials as testTeamsToken,
+  type TeamsCredentials,
+  type TeamsEvent,
+} from './adapters/teams/index'
+import { ByoTunnelProvider, normalizeBaseUrl, type TunnelProvider } from './adapters/teams/tunnel/index'
 import { TopicRegistry } from './topic-registry'
 import type { SessionEvent } from './renderer'
 import type { EventSinkFn } from './event-fanout'
@@ -85,6 +93,13 @@ export interface MessagingGatewayRegistryOptions {
     /** Node binary override (defaults to process.execPath with ELECTRON_RUN_AS_NODE). */
     nodeBin?: string
   }
+  /** Optional Teams config — enables the Teams (Bot Framework) adapter. */
+  teams?: {
+    /** Local HTTP listener port the tunnel points at. Default 3978. */
+    localPort?: number
+    /** Cache dir for the on-demand devtunnel binary (Phase 2). */
+    devtunnelCacheDir?: string
+  }
   /** Optional logger — shared with the gateway and adapters. */
   logger?: MessagingLogger
 }
@@ -98,6 +113,9 @@ interface WorkspaceState {
   whatsappOffEvent?: () => void
   discord: DiscordAdapter | null
   discordOffEvent?: () => void
+  teams: TeamsAdapter | null
+  teamsOffEvent?: () => void
+  teamsTunnel?: TunnelProvider | null
   runtime: Record<PlatformType, MessagingPlatformRuntimeInfo>
 }
 
@@ -193,6 +211,22 @@ export class MessagingGatewayRegistry implements IMessagingGatewayRegistry {
       })
     }
 
+    if (isPlatformConfigured(config, 'teams')) {
+      this.setPlatformRuntime(workspaceId, state, 'teams', {
+        configured: true,
+        connected: false,
+        state: 'connecting',
+        lastError: undefined,
+      })
+      void this.tryConnectTeams(workspaceId, state).catch((err) => {
+        this.log.error('background Teams connect failed', {
+          event: 'teams_connect_failed',
+          workspaceId,
+          error: err,
+        })
+      })
+    }
+
     if (isPlatformConfigured(config, 'whatsapp')) {
       if (this.hasWhatsAppAuthState(workspaceId)) {
         this.setPlatformRuntime(workspaceId, state, 'whatsapp', {
@@ -258,6 +292,7 @@ export class MessagingGatewayRegistry implements IMessagingGatewayRegistry {
         whatsapp: cloneRuntime(state.runtime.whatsapp),
         lark: cloneRuntime(state.runtime.lark),
         discord: cloneRuntime(state.runtime.discord),
+        teams: cloneRuntime(state.runtime.teams),
       },
     }
   }
@@ -278,6 +313,7 @@ export class MessagingGatewayRegistry implements IMessagingGatewayRegistry {
       await state.gateway.unregisterAdapter('whatsapp').catch(() => {})
       await state.gateway.unregisterAdapter('lark').catch(() => {})
       await state.gateway.unregisterAdapter('discord').catch(() => {})
+      await state.gateway.unregisterAdapter('teams').catch(() => {})
       state.whatsappOffEvent?.()
       state.whatsappOffEvent = undefined
       state.whatsapp = null
@@ -286,6 +322,16 @@ export class MessagingGatewayRegistry implements IMessagingGatewayRegistry {
       if (state.discord) {
         await state.discord.destroy().catch(() => {})
         state.discord = null
+      }
+      state.teamsOffEvent?.()
+      state.teamsOffEvent = undefined
+      if (state.teams) {
+        await state.teams.destroy().catch(() => {})
+        state.teams = null
+      }
+      if (state.teamsTunnel) {
+        await state.teamsTunnel.stop().catch(() => {})
+        state.teamsTunnel = null
       }
       this.setPlatformRuntime(workspaceId, state, 'telegram', {
         configured: false,
@@ -315,10 +361,17 @@ export class MessagingGatewayRegistry implements IMessagingGatewayRegistry {
         identity: undefined,
         lastError: undefined,
       })
+      this.setPlatformRuntime(workspaceId, state, 'teams', {
+        configured: false,
+        connected: false,
+        state: 'disconnected',
+        identity: undefined,
+        lastError: undefined,
+      })
       return
     }
 
-    for (const platform of ['telegram', 'whatsapp', 'lark', 'discord'] as const) {
+    for (const platform of ['telegram', 'whatsapp', 'lark', 'discord', 'teams'] as const) {
       const configured = isPlatformConfigured(cfg, platform)
       if (!configured && state.gateway.getAdapter(platform)) {
         await state.gateway.unregisterAdapter(platform).catch(() => {})
@@ -334,6 +387,18 @@ export class MessagingGatewayRegistry implements IMessagingGatewayRegistry {
         if (state.discord) {
           await state.discord.destroy().catch(() => {})
           state.discord = null
+        }
+      }
+      if (!configured && platform === 'teams') {
+        state.teamsOffEvent?.()
+        state.teamsOffEvent = undefined
+        if (state.teams) {
+          await state.teams.destroy().catch(() => {})
+          state.teams = null
+        }
+        if (state.teamsTunnel) {
+          await state.teamsTunnel.stop().catch(() => {})
+          state.teamsTunnel = null
         }
       }
       if (!configured) {
@@ -1070,11 +1135,13 @@ export class MessagingGatewayRegistry implements IMessagingGatewayRegistry {
       botUsernames: {},
       whatsapp: null,
       discord: null,
+      teams: null,
       runtime: {
         telegram: createRuntime('telegram', isPlatformConfigured(cfg, 'telegram')),
         whatsapp: createRuntime('whatsapp', isPlatformConfigured(cfg, 'whatsapp')),
         lark: createRuntime('lark', isPlatformConfigured(cfg, 'lark')),
         discord: createRuntime('discord', isPlatformConfigured(cfg, 'discord')),
+        teams: createRuntime('teams', isPlatformConfigured(cfg, 'teams')),
       },
     }
     this.workspaces.set(workspaceId, state)
@@ -1358,6 +1425,154 @@ export class MessagingGatewayRegistry implements IMessagingGatewayRegistry {
           })
         }
         return
+    }
+  }
+
+  async testTeamsCredentials(
+    creds: TeamsCredentials,
+  ): Promise<{ success: boolean; botName?: string; error?: string }> {
+    return testTeamsToken(creds)
+  }
+
+  async saveTeamsCredentials(
+    workspaceId: string,
+    input: TeamsSaveInput,
+  ): Promise<{ messagingEndpoint: string }> {
+    const test = await testTeamsToken(input)
+    if (!test.success) throw new Error(test.error ?? 'Invalid Teams credentials')
+    if (input.tunnelMode === 'byo') {
+      if (!input.byoUrl) throw new Error('A public HTTPS URL is required for bring-your-own tunnel mode')
+      normalizeBaseUrl(input.byoUrl) // throws on non-https
+    }
+
+    await this.opts.credentialManager.set(
+      { type: 'messaging_bearer', workspaceId, name: 'teams' },
+      { value: JSON.stringify({ appId: input.appId, appPassword: input.appPassword, tenantId: input.tenantId }) },
+    )
+
+    const state = this.workspaces.get(workspaceId) ?? this.bootstrapWorkspace(workspaceId)
+    state.configStore.update({
+      enabled: true,
+      platforms: { teams: { enabled: true, tunnelMode: input.tunnelMode, byoUrl: input.byoUrl } },
+    })
+
+    this.setPlatformRuntime(workspaceId, state, 'teams', {
+      configured: true,
+      connected: false,
+      state: 'connecting',
+      lastError: undefined,
+    })
+
+    await this.tryConnectTeams(workspaceId, state)
+    await state.gateway.start()
+
+    const endpoint = state.configStore.get().platforms.teams?.messagingEndpoint
+    return { messagingEndpoint: endpoint ?? '' }
+  }
+
+  private async tryConnectTeams(workspaceId: string, state: WorkspaceState): Promise<void> {
+    const cfg = state.configStore.get().platforms.teams
+    const cred = await this.opts.credentialManager
+      .get({ type: 'messaging_bearer', workspaceId, name: 'teams' })
+      .catch(() => null)
+    if (!cfg || !cred?.value) {
+      this.setPlatformRuntime(workspaceId, state, 'teams', {
+        configured: true,
+        connected: false,
+        state: 'error',
+        lastError: 'Teams credentials are missing.',
+      })
+      return
+    }
+
+    let creds: TeamsCredentials
+    try {
+      creds = parseTeamsCredentials(cred.value)
+    } catch (err) {
+      this.setPlatformRuntime(workspaceId, state, 'teams', {
+        configured: true,
+        connected: false,
+        state: 'error',
+        lastError: err instanceof Error ? err.message : 'Teams credentials are malformed',
+      })
+      return
+    }
+
+    // Tear down any prior adapter/tunnel (reconnect path).
+    await state.gateway.unregisterAdapter('teams').catch(() => {})
+    state.teamsOffEvent?.()
+    state.teamsOffEvent = undefined
+    if (state.teams) {
+      await state.teams.destroy().catch(() => {})
+      state.teams = null
+    }
+    if (state.teamsTunnel) {
+      await state.teamsTunnel.stop().catch(() => {})
+      state.teamsTunnel = null
+    }
+
+    try {
+      // Phase 1: BYO tunnel only. (Phase 2 adds the devtunnel branch here.)
+      if (cfg.tunnelMode !== 'byo' || !cfg.byoUrl) {
+        throw new Error('Teams requires a bring-your-own HTTPS URL in this build')
+      }
+      const tunnel: TunnelProvider = new ByoTunnelProvider({ baseUrl: cfg.byoUrl })
+      const localPort = this.opts.teams?.localPort ?? 3978
+      const { publicUrl } = await tunnel.start(localPort)
+      state.teamsTunnel = tunnel
+
+      const adapter = new TeamsAdapter()
+      state.teams = adapter
+      state.teamsOffEvent = adapter.onEvent((ev) => this.onTeamsEvent(workspaceId, ev))
+      await adapter.initialize({
+        appId: creds.appId,
+        appPassword: creds.appPassword,
+        tenantId: creds.tenantId,
+        localPort,
+        logger: this.log.child({ component: 'teams-adapter', workspaceId, platform: 'teams' }),
+      })
+      state.gateway.registerAdapter(adapter)
+
+      state.configStore.update({
+        platforms: { teams: { ...cfg, messagingEndpoint: teamsMessagingEndpoint(publicUrl) } },
+      })
+
+      this.setPlatformRuntime(workspaceId, state, 'teams', {
+        configured: true,
+        connected: true,
+        state: 'connected',
+        identity: creds.appId,
+        lastError: undefined,
+      })
+    } catch (err) {
+      this.log.error('failed to connect Teams', { event: 'teams_connect_failed', workspaceId, error: err })
+      state.teamsOffEvent?.()
+      state.teamsOffEvent = undefined
+      state.teams = null
+      if (state.teamsTunnel) {
+        await state.teamsTunnel.stop().catch(() => {})
+        state.teamsTunnel = null
+      }
+      this.setPlatformRuntime(workspaceId, state, 'teams', {
+        configured: true,
+        connected: false,
+        state: 'error',
+        lastError: err instanceof Error ? err.message : String(err),
+      })
+      throw err
+    }
+  }
+
+  private onTeamsEvent(workspaceId: string, event: TeamsEvent): void {
+    const state = this.workspaces.get(workspaceId)
+    if (!state) return
+    if (event.type === 'error' || event.type === 'unavailable') {
+      this.setPlatformRuntime(workspaceId, state, 'teams', {
+        configured: true,
+        connected: false,
+        state: 'error',
+        lastError: event.message,
+      })
     }
   }
 
@@ -1814,6 +2029,15 @@ function dedupeOwners(owners: PlatformOwner[]): PlatformOwner[] {
     map.set(o.userId, { ...o })
   }
   return Array.from(map.values())
+}
+
+export interface TeamsSaveInput extends TeamsCredentials {
+  tunnelMode: 'byo' | 'devtunnel'
+  byoUrl?: string
+}
+
+function teamsMessagingEndpoint(publicBaseUrl: string): string {
+  return `${normalizeBaseUrl(publicBaseUrl)}/api/messages`
 }
 
 function createRuntime(platform: PlatformType, configured: boolean): MessagingPlatformRuntimeInfo {

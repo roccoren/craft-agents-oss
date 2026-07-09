@@ -52,6 +52,13 @@ export interface MessagingBootstrapOptions {
     /** Node binary to spawn (see whatsapp.nodeBin rationale). */
     nodeBin?: string
   }
+  /** Optional Teams (Bot Framework) config. Omit to leave Teams unavailable. */
+  teams?: {
+    /** Local HTTP listener port the tunnel points at. Default 3978. */
+    localPort?: number
+    /** Cache dir for the on-demand devtunnel binary (Phase 2). */
+    devtunnelCacheDir?: string
+  }
 }
 
 export interface MessagingBootstrapHandle {
@@ -89,6 +96,14 @@ export function createMessagingBootstrap(opts: MessagingBootstrapOptions): Messa
           discord: {
             workerEntry: opts.discord.workerEntry,
             nodeBin: opts.discord.nodeBin,
+          },
+        }
+      : {}),
+    ...(opts.teams
+      ? {
+          teams: {
+            localPort: opts.teams.localPort,
+            devtunnelCacheDir: opts.teams.devtunnelCacheDir,
           },
         }
       : {}),
