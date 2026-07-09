@@ -19,12 +19,17 @@
 import { spawn as nodeSpawn } from 'node:child_process'
 
 /** Parse the tunnel id out of `devtunnel create --json` stdout. Tolerates
- * both the documented `{ tunnel: { id } }` shape and a flat `{ id }` shape,
- * since exact CLI output has varied across versions. */
+ * both the real CLI shape (`{ tunnel: { tunnelId } }`, confirmed against a
+ * live Windows devtunnel run) and the `id` variants Microsoft's docs samples
+ * show, since exact CLI output has varied across versions/platforms. */
 export function parseTunnelId(jsonOutput: string): string | null {
   try {
-    const parsed = JSON.parse(jsonOutput) as { tunnel?: { id?: string }; id?: string }
-    return parsed.tunnel?.id ?? parsed.id ?? null
+    const parsed = JSON.parse(jsonOutput) as {
+      tunnel?: { tunnelId?: string; id?: string }
+      tunnelId?: string
+      id?: string
+    }
+    return parsed.tunnel?.tunnelId ?? parsed.tunnel?.id ?? parsed.tunnelId ?? parsed.id ?? null
   } catch {
     return null
   }

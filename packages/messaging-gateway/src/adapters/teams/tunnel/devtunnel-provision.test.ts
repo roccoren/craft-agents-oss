@@ -3,8 +3,33 @@ import { EventEmitter } from 'node:events'
 import { parseTunnelId, DevTunnelResourceProvisioner } from './devtunnel-provision'
 
 describe('parseTunnelId', () => {
+  it('extracts the id from the real devtunnel CLI shape `{ tunnel: { tunnelId } }`', () => {
+    // Verbatim payload observed from a real `devtunnel create --allow-anonymous
+    // --json` run (Windows, devtunnel CLI, 2026-07). The field is `tunnelId`,
+    // not `id` as Microsoft's own docs samples suggest -- this is the actual
+    // shape that matters.
+    const real = {
+      tunnel: {
+        tunnelId: 'sneaky-plane-vvjxm25.jpe1',
+        hostConnections: 0,
+        clientConnections: 0,
+        labels: [],
+        tunnelExpiration: '30 days',
+        description: '',
+        currentUploadRate: '0 MB/s (limit: 20 MB/s)',
+        currentDownloadRate: '0 MB/s (limit: 20 MB/s)',
+        accessControl: [{ type: 'Anonymous', subjects: [], scopes: ['connect'] }],
+      },
+    }
+    expect(parseTunnelId(JSON.stringify(real))).toBe('sneaky-plane-vvjxm25.jpe1')
+  })
+
   it('extracts the id from a `{ tunnel: { id } }` JSON shape', () => {
     expect(parseTunnelId(JSON.stringify({ tunnel: { id: 'abc123' } }))).toBe('abc123')
+  })
+
+  it('extracts the id from a flat `{ tunnelId }` JSON shape', () => {
+    expect(parseTunnelId(JSON.stringify({ tunnelId: 'flat-tunnel-id' }))).toBe('flat-tunnel-id')
   })
 
   it('extracts the id from a flat `{ id }` JSON shape', () => {
