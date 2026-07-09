@@ -39,6 +39,8 @@ import {
   type TeamsEvent,
 } from './adapters/teams/index'
 import { ByoTunnelProvider, normalizeBaseUrl, type TunnelProvider } from './adapters/teams/tunnel/index'
+import { DevTunnelProvider } from './adapters/teams/tunnel/devtunnel'
+import { DevTunnelBinaryProvisioner } from './adapters/teams/tunnel/devtunnel-binary'
 import { TopicRegistry } from './topic-registry'
 import type { SessionEvent } from './renderer'
 import type { EventSinkFn } from './event-fanout'
@@ -1444,7 +1446,6 @@ export class MessagingGatewayRegistry implements IMessagingGatewayRegistry {
       if (!input.byoUrl) throw new Error('A public HTTPS URL is required for bring-your-own tunnel mode')
       normalizeBaseUrl(input.byoUrl) // throws on non-https
     }
-
     await this.opts.credentialManager.set(
       { type: 'messaging_bearer', workspaceId, name: 'teams' },
       { value: JSON.stringify({ appId: input.appId, appPassword: input.appPassword, tenantId: input.tenantId }) },
@@ -1512,11 +1513,20 @@ export class MessagingGatewayRegistry implements IMessagingGatewayRegistry {
     }
 
     try {
-      // Phase 1: BYO tunnel only. (Phase 2 adds the devtunnel branch here.)
-      if (cfg.tunnelMode !== 'byo' || !cfg.byoUrl) {
-        throw new Error('Teams requires a bring-your-own HTTPS URL in this build')
+      let tunnel: TunnelProvider
+      if (cfg.tunnelMode === 'devtunnel') {
+        if (!this.opts.teams?.devtunnelCacheDir) {
+          throw new Error('devtunnel cache dir is not configured on this host')
+        }
+        const provisioner = new DevTunnelBinaryProvisioner({ cacheDir: this.opts.teams.devtunnelCacheDir })
+        const binPath = await provisioner.ensure()
+        tunnel = new DevTunnelProvider({ binPath, tunnelId: cfg.devtunnelId })
+      } else {
+        if (!cfg.byoUrl) {
+          throw new Error('A public HTTPS URL is required for bring-your-own tunnel mode')
+        }
+        tunnel = new ByoTunnelProvider({ baseUrl: cfg.byoUrl })
       }
-      const tunnel: TunnelProvider = new ByoTunnelProvider({ baseUrl: cfg.byoUrl })
       const localPort = this.opts.teams?.localPort ?? 3978
       const { publicUrl } = await tunnel.start(localPort)
       state.teamsTunnel = tunnel

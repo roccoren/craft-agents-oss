@@ -38,6 +38,7 @@ export function TeamsConnectDialog({ open, onOpenChange, reconfigure = false, on
   const [appId, setAppId] = React.useState('')
   const [appPassword, setAppPassword] = React.useState('')
   const [tenantId, setTenantId] = React.useState('')
+  const [tunnelMode, setTunnelMode] = React.useState<'devtunnel' | 'byo'>('devtunnel')
   const [byoUrl, setByoUrl] = React.useState('')
   const [saving, setSaving] = React.useState(false)
   const [test, setTest] = React.useState<TestResult>({ state: 'idle' })
@@ -48,6 +49,7 @@ export function TeamsConnectDialog({ open, onOpenChange, reconfigure = false, on
       setAppId('')
       setAppPassword('')
       setTenantId('')
+      setTunnelMode('devtunnel')
       setByoUrl('')
       setTest({ state: 'idle' })
       setSaving(false)
@@ -56,7 +58,8 @@ export function TeamsConnectDialog({ open, onOpenChange, reconfigure = false, on
   }, [open])
 
   const ready = appId.trim().length > 0 && appPassword.trim().length > 0
-  const canSave = ready && byoUrl.trim().length > 0 && test.state === 'success'
+  const canSave =
+    ready && test.state === 'success' && (tunnelMode === 'devtunnel' || byoUrl.trim().length > 0)
 
   const handleTest = async () => {
     if (!ready) return
@@ -81,8 +84,8 @@ export function TeamsConnectDialog({ open, onOpenChange, reconfigure = false, on
         appId: appId.trim(),
         appPassword: appPassword.trim(),
         tenantId: tenantId.trim() || undefined,
-        tunnelMode: 'byo',
-        byoUrl: byoUrl.trim(),
+        tunnelMode,
+        byoUrl: tunnelMode === 'byo' ? byoUrl.trim() : undefined,
       })
       setEndpoint(res.messagingEndpoint)
       toast.success(t('settings.messaging.teams.saved'))
@@ -137,14 +140,39 @@ export function TeamsConnectDialog({ open, onOpenChange, reconfigure = false, on
             />
           </div>
           <div>
-            <div className="mb-1.5 text-xs text-muted-foreground">{t('settings.messaging.teams.byoUrlLabel')}</div>
-            <SettingsSecretInput
-              value={byoUrl}
-              onChange={setByoUrl}
-              placeholder={t('settings.messaging.teams.byoUrlPlaceholder')}
-              disabled={saving}
-            />
+            <div className="mb-1.5 text-xs text-muted-foreground">{t('settings.messaging.teams.tunnelModeLabel')}</div>
+            <div className="flex gap-2">
+              <Button
+                variant={tunnelMode === 'devtunnel' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setTunnelMode('devtunnel')}
+                disabled={saving}
+              >
+                {t('settings.messaging.teams.tunnelModeDevtunnel')}
+              </Button>
+              <Button
+                variant={tunnelMode === 'byo' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setTunnelMode('byo')}
+                disabled={saving}
+              >
+                {t('settings.messaging.teams.tunnelModeByo')}
+              </Button>
+            </div>
           </div>
+          {tunnelMode === 'devtunnel' ? (
+            <div className="text-xs text-muted-foreground">{t('settings.messaging.teams.devtunnelHint')}</div>
+          ) : (
+            <div>
+              <div className="mb-1.5 text-xs text-muted-foreground">{t('settings.messaging.teams.byoUrlLabel')}</div>
+              <SettingsSecretInput
+                value={byoUrl}
+                onChange={setByoUrl}
+                placeholder={t('settings.messaging.teams.byoUrlPlaceholder')}
+                disabled={saving}
+              />
+            </div>
+          )}
 
           <div className="flex items-center gap-2">
             <Button
