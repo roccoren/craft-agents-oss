@@ -7,7 +7,7 @@
  * so replies can be sent proactively via `continueConversationAsync`.
  */
 import { createServer, type IncomingMessage as NodeReq, type Server } from 'node:http'
-import { createRequire } from 'node:module'
+import { CloudAdapter, ConfigurationBotFrameworkAuthentication } from 'botbuilder'
 import type {
   PlatformAdapter,
   PlatformConfig,
@@ -281,10 +281,17 @@ export class TeamsAdapter implements PlatformAdapter {
   }
 }
 
-/** Real botbuilder-backed factory. Loaded lazily (ESM-safe) so tests never load it. */
+/** Real botbuilder-backed factory, using the top-level import above.
+ *
+ * NOTE: do NOT use `createRequire(import.meta.url)` here. `botbuilder` is
+ * plain CJS (no native deps), so a normal ESM import bundles cleanly via
+ * esbuild — same pattern as the Lark adapter's SDK import. `import.meta.url`
+ * resolves to `undefined` once esbuild bundles this file into main.cjs
+ * (`--format=cjs`), which throws `ERR_INVALID_ARG_VALUE` from
+ * `createRequire(undefined)` at runtime (see the identical issue documented
+ * for `@anthropic-ai/claude-agent-sdk` in scripts/electron-build-main.ts).
+ */
 function defaultCloudAdapterFactory(creds: TeamsCredentials): TeamsCloudAdapterLike {
-  const require = createRequire(import.meta.url)
-  const { CloudAdapter, ConfigurationBotFrameworkAuthentication } = require('botbuilder')
   const auth = new ConfigurationBotFrameworkAuthentication({
     MicrosoftAppId: creds.appId,
     MicrosoftAppPassword: creds.appPassword,
