@@ -432,6 +432,8 @@ export const RPC_CHANNELS = {
     SAVE_LARK: 'messaging:saveLark',
     TEST_DISCORD: 'messaging:testDiscord',
     SAVE_DISCORD: 'messaging:saveDiscord',
+    TEST_TEAMS: 'messaging:testTeams',
+    SAVE_TEAMS: 'messaging:saveTeams',
     DISCONNECT: 'messaging:disconnect',
     FORGET: 'messaging:forget',
     GET_BINDINGS: 'messaging:getBindings',

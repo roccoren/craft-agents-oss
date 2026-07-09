@@ -204,6 +204,22 @@ export interface IMessagingGatewayRegistry {
     token: string
   }): Promise<void>
 
+  /** Validate Teams (Azure Bot) credentials by acquiring a Bot Connector token. */
+  testTeamsCredentials(creds: {
+    appId: string
+    appPassword: string
+    tenantId?: string
+  }): Promise<{ success: boolean; botName?: string; error?: string }>
+
+  /** Save Teams credentials + tunnel config and (re)initialize the adapter. */
+  saveTeamsCredentials(workspaceId: string, creds: {
+    appId: string
+    appPassword: string
+    tenantId?: string
+    tunnelMode: 'byo' | 'devtunnel'
+    byoUrl?: string
+  }): Promise<{ messagingEndpoint: string }>
+
   /** Disable a platform for a workspace, preserving WhatsApp auth state unless forgotten separately. */
   disconnectPlatform(workspaceId: string, platform: string): Promise<void>
 

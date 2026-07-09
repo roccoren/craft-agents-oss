@@ -69,6 +69,22 @@ export function registerMessagingHandlers(server: RpcServer, deps: HandlerDeps):
     return { success: true }
   })
 
+  server.handle(RPC_CHANNELS.messaging.TEST_TEAMS, async (
+    _ctx,
+    creds: { appId: string; appPassword: string; tenantId?: string },
+  ) => {
+    return registry.testTeamsCredentials(creds)
+  })
+
+  server.handle(RPC_CHANNELS.messaging.SAVE_TEAMS, async (
+    ctx,
+    creds: { appId: string; appPassword: string; tenantId?: string; tunnelMode: 'byo' | 'devtunnel'; byoUrl?: string },
+  ) => {
+    if (!ctx.workspaceId) throw new Error('Missing workspaceId')
+    const result = await registry.saveTeamsCredentials(ctx.workspaceId, creds)
+    return { success: true, ...result }
+  })
+
   server.handle(RPC_CHANNELS.messaging.DISCONNECT, async (ctx, platform: string) => {
     if (!ctx.workspaceId) throw new Error('Missing workspaceId')
     await registry.disconnectPlatform(ctx.workspaceId, platform)
