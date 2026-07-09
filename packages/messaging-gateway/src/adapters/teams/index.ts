@@ -164,15 +164,26 @@ export class TeamsAdapter implements PlatformAdapter {
   }
 
   private async onTurn(context: TeamsTurnContextLike): Promise<void> {
-    const activity = context.activity
+    await this.handleActivity(context.activity)
+  }
+
+  /**
+   * Core inbound dispatch: store the proactive conversation reference and route
+   * the activity to the message/button handlers. Exposed (not private) so it can
+   * be driven deterministically in tests without a real socket round-trip; the
+   * HTTP path calls it via `onTurn`.
+   */
+  async handleActivity(
+    activity: TeamsActivity & { channelId?: string; serviceUrl?: string },
+  ): Promise<void> {
     const channelId = activity.conversation?.id
     if (channelId) this.conversationRefs.set(channelId, referenceFromActivity(activity))
 
     const press = activityToButtonPress(activity)
-    if (press && this.buttonHandler) { void this.buttonHandler(press); return }
+    if (press && this.buttonHandler) { await this.buttonHandler(press); return }
 
     const msg = activityToIncoming(activity)
-    if (msg && this.messageHandler) { void this.messageHandler(msg) }
+    if (msg && this.messageHandler) { await this.messageHandler(msg) }
   }
 
   async destroy(): Promise<void> {
