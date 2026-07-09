@@ -83,6 +83,24 @@ export class Router {
         return
       }
 
+      // Teams channel/group-trigger gate: mirrors the Discord gate. Personal
+      // chats (isDM) always route; channel/group messages route only when the
+      // bot is @mentioned unless the binding opts into 'all'.
+      if (
+        msg.platform === 'teams' &&
+        msg.isDM === false &&
+        msg.mentionedBot !== true &&
+        binding.config.teamsChannelTrigger !== 'all'
+      ) {
+        this.log.info('ignoring un-mentioned teams channel message', {
+          event: 'teams_trigger_skipped',
+          channelId: msg.channelId,
+          sessionId: binding.sessionId,
+          bindingId: binding.id,
+        })
+        return
+      }
+
       const verdict = evaluateBindingAccess({
         msg,
         workspaceConfig: this.deps.getWorkspaceConfig(),
