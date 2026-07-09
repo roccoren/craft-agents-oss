@@ -19,6 +19,7 @@
     "@craft-agent/server-core": "workspace:*",
     "@craft-agent/shared": "workspace:*",
     "@larksuiteoapi/node-sdk": "^1.62.1",
+    "botbuilder": "^4.23.0",
     "grammy": "^1.35.0"
   },
   "devDependencies": {

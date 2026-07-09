@@ -9,7 +9,7 @@
 // Platform types
 // ---------------------------------------------------------------------------
 
-export type PlatformType = 'telegram' | 'whatsapp' | 'lark' | 'discord'
+export type PlatformType = 'telegram' | 'whatsapp' | 'lark' | 'discord' | 'teams'
 
 // ---------------------------------------------------------------------------
 // Logger
@@ -70,7 +70,7 @@ export interface AdapterCapabilities {
   inlineButtons: boolean
   maxButtons: number
   maxMessageLength: number
-  markdown: 'v2' | 'whatsapp' | 'lark-post' | 'discord'
+  markdown: 'v2' | 'whatsapp' | 'lark-post' | 'discord' | 'teams'
   webhookSupport: boolean
 }
 
@@ -103,15 +103,16 @@ export interface IncomingMessage {
    */
   senderIsBot?: boolean
   /**
-   * Discord only: `true` when the message arrived in a DM channel. Undefined
-   * for non-Discord platforms. Used by the router's guild-trigger gate.
+   * Discord and Teams only: `true` when the message arrived in a DM/personal
+   * channel. Undefined for other platforms. Used by the router's channel-trigger
+   * gate.
    */
   isDM?: boolean
   /**
-   * Discord only: `true` when the bot user was @mentioned in the message.
-   * Undefined for non-Discord platforms. Combined with the binding's
-   * `discordGuildTrigger`, the router decides whether a guild-channel message
-   * routes to the session.
+   * Discord and Teams only: `true` when the bot user was @mentioned in the
+   * message. Undefined for other platforms. Combined with the binding's
+   * `discordGuildTrigger` / `teamsChannelTrigger`, the router decides whether a
+   * guild/channel message routes to the session.
    */
   mentionedBot?: boolean
   text: string
@@ -306,6 +307,14 @@ export interface BindingConfig {
    * Ignored for DMs (always route) and non-Discord platforms.
    */
   discordGuildTrigger: 'mention' | 'all'
+  /**
+   * Teams-only: in a bound channel or group chat, decides which messages
+   * route to the session.
+   *  - `'mention'` (default) — only messages that @mention the bot route.
+   *  - `'all'` — every message routes.
+   * Ignored for 1:1 personal chats (always route) and non-Teams platforms.
+   */
+  teamsChannelTrigger: 'mention' | 'all'
 }
 
 export const DEFAULT_BINDING_CONFIG: BindingConfig = {
@@ -317,6 +326,7 @@ export const DEFAULT_BINDING_CONFIG: BindingConfig = {
   accessMode: 'inherit',
   allowedSenderIds: [],
   discordGuildTrigger: 'mention',
+  teamsChannelTrigger: 'mention',
 }
 
 export function getDefaultBindingConfig(platform: PlatformType): BindingConfig {
@@ -532,6 +542,17 @@ export interface MessagingConfig {
     }
     discord?: {
       enabled: boolean
+    }
+    teams?: {
+      enabled: boolean
+      /** How the public messaging endpoint is provided. */
+      tunnelMode: 'byo' | 'devtunnel'
+      /** Bring-your-own stable HTTPS base URL (no trailing slash). Used when tunnelMode==='byo'. */
+      byoUrl?: string
+      /** Persistent Dev Tunnel id (Phase 2). Used when tunnelMode==='devtunnel'. */
+      devtunnelId?: string
+      /** Computed `<publicBase>/api/messages` shown in the UI to paste into Azure. */
+      messagingEndpoint?: string
     }
   }
 }
