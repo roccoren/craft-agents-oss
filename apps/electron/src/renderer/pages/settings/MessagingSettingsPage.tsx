@@ -52,6 +52,7 @@ import { MessagingPlatformIcon } from '@/components/messaging/MessagingPlatformI
 import { TelegramConnectDialog } from '@/components/messaging/TelegramConnectDialog'
 import { LarkConnectDialog } from '@/components/messaging/LarkConnectDialog'
 import { DiscordConnectDialog } from '@/components/messaging/DiscordConnectDialog'
+import { TeamsConnectDialog } from '@/components/messaging/TeamsConnectDialog'
 import { TelegramSupergroupPairingDialog } from '@/components/messaging/TelegramSupergroupPairingDialog'
 import { WhatsAppConnectDialog } from '@/components/messaging/WhatsAppConnectDialog'
 import {
@@ -128,6 +129,9 @@ export default function MessagingSettingsPage() {
             <SettingsCard>
               <PlatformRow platform="discord" workspaceId={activeWorkspace.id} />
             </SettingsCard>
+            <SettingsCard>
+              <PlatformRow platform="teams" workspaceId={activeWorkspace.id} />
+            </SettingsCard>
           </SettingsSection>
         </div>
       </ScrollArea>
@@ -139,13 +143,14 @@ export default function MessagingSettingsPage() {
 // Platform row
 // ---------------------------------------------------------------------------
 
-type Platform = 'telegram' | 'whatsapp' | 'lark' | 'discord'
+type Platform = 'telegram' | 'whatsapp' | 'lark' | 'discord' | 'teams'
 
 const PLATFORM_LABEL_KEYS: Record<Platform, string> = {
   telegram: 'settings.messaging.telegram.title',
   whatsapp: 'settings.messaging.whatsapp.title',
   lark: 'settings.messaging.lark.title',
   discord: 'settings.messaging.discord.title',
+  teams: 'settings.messaging.teams.title',
 }
 
 // Row column geometry shared across the bot header and all child rows.
@@ -480,6 +485,9 @@ function PlatformRow({ platform, workspaceId }: { platform: Platform; workspaceI
       )}
       {platform === 'discord' && (
         <DiscordConnectDialog open={connectOpen} onOpenChange={setConnectOpen} reconfigure={reconfigure} />
+      )}
+      {platform === 'teams' && (
+        <TeamsConnectDialog open={connectOpen} onOpenChange={setConnectOpen} reconfigure={reconfigure} />
       )}
     </>
   )

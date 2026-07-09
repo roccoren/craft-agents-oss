@@ -707,6 +707,8 @@ export interface ElectronAPI {
   saveLarkCredentials(creds: { appId: string; appSecret: string; domain: 'lark' | 'feishu' }): Promise<void>
   testDiscordCredentials(creds: { token: string }): Promise<{ success: boolean; botName?: string; error?: string }>
   saveDiscordCredentials(creds: { token: string }): Promise<void>
+  testTeamsCredentials(creds: { appId: string; appPassword: string; tenantId?: string }): Promise<{ success: boolean; botName?: string; error?: string }>
+  saveTeamsCredentials(creds: { appId: string; appPassword: string; tenantId?: string; tunnelMode: 'byo' | 'devtunnel'; byoUrl?: string }): Promise<{ success: boolean; messagingEndpoint: string }>
   disconnectMessagingPlatform(platform: string): Promise<void>
   forgetMessagingPlatform(platform: string): Promise<void>
   getMessagingBindings(): Promise<Array<{ id: string; workspaceId: string; sessionId: string; platform: string; channelId: string; threadId?: number; channelName?: string; enabled: boolean; createdAt: number; accessMode?: MessagingBindingAccessMode; allowedSenderIds?: string[] }>>

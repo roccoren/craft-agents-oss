@@ -693,6 +693,13 @@ app.whenReady().then(async () => {
                 ? join(process.resourcesPath, 'messaging-discord-worker', 'worker.cjs')
                 : join(process.cwd(), 'packages', 'messaging-discord-worker', 'dist', 'worker.cjs'),
             },
+            // Teams runs in-process (no worker). It hosts a local HTTP listener
+            // that the tunnel points at; the devtunnel binary (if used) is
+            // downloaded on demand and cached under the app data dir.
+            teams: {
+              localPort: 3978,
+              devtunnelCacheDir: join(homedir(), '.craft-agent', 'devtunnel'),
+            },
           })
           return {
             sessionManager: sm,

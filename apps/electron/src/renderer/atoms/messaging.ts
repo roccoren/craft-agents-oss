@@ -60,7 +60,7 @@ export type MessagingDialogState =
   | { kind: 'closed' }
   | {
       kind: 'pairing'
-      platform: 'telegram' | 'whatsapp' | 'lark' | 'discord'
+      platform: 'telegram' | 'whatsapp' | 'lark' | 'discord' | 'teams'
       sessionId: string
       code: string | null
       expiresAt: number | null

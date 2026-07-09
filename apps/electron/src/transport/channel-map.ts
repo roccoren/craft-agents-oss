@@ -418,6 +418,8 @@ export const CHANNEL_MAP = {
   saveLarkCredentials: invoke(RPC_CHANNELS.messaging.SAVE_LARK),
   testDiscordCredentials: invoke(RPC_CHANNELS.messaging.TEST_DISCORD),
   saveDiscordCredentials: invoke(RPC_CHANNELS.messaging.SAVE_DISCORD),
+  testTeamsCredentials: invoke(RPC_CHANNELS.messaging.TEST_TEAMS),
+  saveTeamsCredentials: invoke(RPC_CHANNELS.messaging.SAVE_TEAMS),
   disconnectMessagingPlatform: invoke(RPC_CHANNELS.messaging.DISCONNECT),
   forgetMessagingPlatform: invoke(RPC_CHANNELS.messaging.FORGET),
   getMessagingBindings: invoke(RPC_CHANNELS.messaging.GET_BINDINGS),

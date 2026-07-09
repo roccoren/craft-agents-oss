@@ -34,7 +34,7 @@ type WhatsAppEventListener = (payload: { workspaceId: string; event: WhatsAppUiE
 
 const PLAYGROUND_WORKSPACE_ID = 'playground-workspace'
 
-type AllowListPlatform = 'telegram' | 'whatsapp' | 'lark' | 'discord'
+type AllowListPlatform = 'telegram' | 'whatsapp' | 'lark' | 'discord' | 'teams'
 
 interface AllowListState {
   accessMode: PlatformAccessMode
@@ -82,6 +82,7 @@ const messagingMockState: MessagingMockState = {
     whatsapp: defaultAllowList(),
     lark: defaultAllowList(),
     discord: defaultAllowList(),
+    teams: defaultAllowList(),
   },
   platformStatusListeners: new Set(),
   bindingListeners: new Set(),
