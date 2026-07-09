@@ -41,6 +41,7 @@ import {
 import { ByoTunnelProvider, normalizeBaseUrl, type TunnelProvider } from './adapters/teams/tunnel/index'
 import { DevTunnelProvider } from './adapters/teams/tunnel/devtunnel'
 import { DevTunnelBinaryProvisioner } from './adapters/teams/tunnel/devtunnel-binary'
+import { DevTunnelResourceProvisioner } from './adapters/teams/tunnel/devtunnel-provision'
 import { TopicRegistry } from './topic-registry'
 import type { SessionEvent } from './renderer'
 import type { EventSinkFn } from './event-fanout'
@@ -1514,13 +1515,24 @@ export class MessagingGatewayRegistry implements IMessagingGatewayRegistry {
 
     try {
       let tunnel: TunnelProvider
+      let resolvedDevtunnelId: string | undefined
       if (cfg.tunnelMode === 'devtunnel') {
         if (!this.opts.teams?.devtunnelCacheDir) {
           throw new Error('devtunnel cache dir is not configured on this host')
         }
         const provisioner = new DevTunnelBinaryProvisioner({ cacheDir: this.opts.teams.devtunnelCacheDir })
         const binPath = await provisioner.ensure()
-        tunnel = new DevTunnelProvider({ binPath, tunnelId: cfg.devtunnelId })
+
+        // Ensure a *persistent* tunnel resource exists. `devtunnel host` run
+        // with no id creates a brand-new temporary tunnel (fresh random URL)
+        // on every call — reusing a created tunnel's id is what actually
+        // makes the public URL stable across app restarts.
+        resolvedDevtunnelId = cfg.devtunnelId
+        if (!resolvedDevtunnelId) {
+          const resourceProvisioner = new DevTunnelResourceProvisioner({ binPath })
+          resolvedDevtunnelId = await resourceProvisioner.create()
+        }
+        tunnel = new DevTunnelProvider({ binPath, tunnelId: resolvedDevtunnelId })
       } else {
         if (!cfg.byoUrl) {
           throw new Error('A public HTTPS URL is required for bring-your-own tunnel mode')
@@ -1544,7 +1556,13 @@ export class MessagingGatewayRegistry implements IMessagingGatewayRegistry {
       state.gateway.registerAdapter(adapter)
 
       state.configStore.update({
-        platforms: { teams: { ...cfg, messagingEndpoint: teamsMessagingEndpoint(publicUrl) } },
+        platforms: {
+          teams: {
+            ...cfg,
+            ...(resolvedDevtunnelId !== undefined ? { devtunnelId: resolvedDevtunnelId } : {}),
+            messagingEndpoint: teamsMessagingEndpoint(publicUrl),
+          },
+        },
       })
 
       this.setPlatformRuntime(workspaceId, state, 'teams', {
