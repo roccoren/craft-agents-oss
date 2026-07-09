@@ -2,6 +2,13 @@
  * DevTunnelProvider — hosts a persistent Azure Dev Tunnel so the public URL is
  * stable across restarts. Requires a prior one-time `devtunnel user login`.
  *
+ * Persistent (already-created) tunnels reject a `host <id> -p <port>` call in
+ * one shot with: "Tunnel service error: Invalid arguments. Batch update of
+ * ports is not supported. Add, update, or delete ports individually instead."
+ * (confirmed against a live devtunnel run). The port must be registered
+ * individually via `devtunnel port create` first; `host` is then invoked with
+ * no `-p` at all, since the tunnel already knows which port to forward.
+ *
  * NOTE: the exact `devtunnel host` stdout format varies by CLI version.
  * `parseTunnelUrl` targets the printed `https://<id>.<cluster>.devtunnels.ms`
  * connect URL; verify against the installed CLI before shipping.
@@ -36,10 +43,45 @@ export class DevTunnelProvider implements TunnelProvider {
     if (opts.onUrl) this.urlHandlers.add(opts.onUrl)
   }
 
-  start(localPort: number): Promise<{ publicUrl: string }> {
+  async start(localPort: number): Promise<{ publicUrl: string }> {
+    if (this.opts.tunnelId) {
+      await this.ensurePortRegistered(this.opts.tunnelId, localPort)
+    }
+    return this.runHost(localPort)
+  }
+
+  /**
+   * Register `localPort` on the persistent tunnel as its own operation. Runs
+   * to completion (short-lived) before `host` ever starts. Tolerates "already
+   * exists" so a reconnect after an earlier partial failure doesn't hard-fail
+   * on a port the tunnel already knows about.
+   */
+  private ensurePortRegistered(tunnelId: string, localPort: number): Promise<void> {
     const spawnImpl = this.opts.spawnImpl ?? nodeSpawn
-    const args = ['host', '--allow-anonymous', '-p', String(localPort)]
-    if (this.opts.tunnelId) args.push(this.opts.tunnelId)
+    const args = ['port', 'create', tunnelId, '-p', String(localPort), '--allow-anonymous']
+    const proc = spawnImpl(this.opts.binPath, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+    return new Promise((resolve, reject) => {
+      let stderr = ''
+      proc.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8') })
+      proc.on('error', reject)
+      proc.on('exit', (code) => {
+        if (code === 0) { resolve(); return }
+        if (/already exists|already defined/i.test(stderr)) { resolve(); return }
+        reject(new Error(`devtunnel port create failed (exit ${code}): ${stderr.trim() || 'no output'}`))
+      })
+    })
+  }
+
+  /** Start the long-running `devtunnel host` process and resolve once its
+   *  public URL appears in stdout. */
+  private runHost(localPort: number): Promise<{ publicUrl: string }> {
+    const spawnImpl = this.opts.spawnImpl ?? nodeSpawn
+    // A persistent tunnel already has its port registered (ensurePortRegistered
+    // above); passing -p again here is what triggers the "batch update" error.
+    // An ad-hoc/temporary session (no tunnelId) still needs -p at host time.
+    const args = this.opts.tunnelId
+      ? ['host', this.opts.tunnelId]
+      : ['host', '--allow-anonymous', '-p', String(localPort)]
     const proc = spawnImpl(this.opts.binPath, args, { stdio: ['ignore', 'pipe', 'pipe'] })
     this.proc = proc
 
@@ -87,3 +129,4 @@ export class DevTunnelProvider implements TunnelProvider {
   onUrlChange(cb: (publicUrl: string) => void): void { this.urlHandlers.add(cb) }
   isRunning(): boolean { return this.proc !== null }
 }
+
