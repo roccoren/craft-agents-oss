@@ -65,6 +65,7 @@ import {
   type CustomEndpointModelEntry,
   type CustomEndpointModelOverrides,
 } from './custom-endpoint-models.ts';
+import { augmentGithubCopilotRegistry } from './github-copilot-extra-models.ts';
 
 // Direct source imports from shared (bundled by bun build)
 import { handleLargeResponse, estimateTokens, tokenLimitFor } from '../../shared/src/utils/large-response.ts';
@@ -510,6 +511,20 @@ function createAuthenticatedRegistry(): {
     registerCustomEndpointModels(modelRegistry, api, initConfig.baseUrl!.trim(), modelEntries);
   } else if (hasCustomEndpoint && !initConfig?.customEndpoint) {
     debugLog('Custom endpoint without protocol config — models may not resolve. Set customEndpoint.api for proper routing.');
+  }
+
+  // GitHub Copilot serves newer models (e.g. gpt-5.6-*) via its live /models API
+  // before the pinned Pi SDK static catalog includes them. The dynamic model
+  // picker already surfaces them, so register the missing ones here to keep the
+  // runtime registry in sync — otherwise resolvePiModel() fails for a model the
+  // user can see and select.
+  if (initConfig?.piAuth?.provider === 'github-copilot') {
+    const copilotToken = (initConfig.piAuth.credential as { access?: string })?.access;
+    try {
+      augmentGithubCopilotRegistry(modelRegistry, copilotToken);
+    } catch (err) {
+      debugLog(`[github-copilot] Failed to augment registry with extra models: ${(err as Error).message}`);
+    }
   }
 
   return { authStorage, modelRegistry };

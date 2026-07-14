@@ -10,6 +10,8 @@ type RawCopilotModel = {
   supportedReasoningEfforts?: string[];
   policy?: { state: string };
   contextWindow?: number;
+  modelPickerEnabled?: boolean;
+  supportsToolCalls?: boolean;
 };
 
 // ── Direct HTTP approach ─────────────────────────────────────────────
@@ -82,13 +84,21 @@ async function listModelsViaHttp(
 
     console.warn(`[listModelsViaHttp] GET /models returned ${models.length} models`);
 
-    return models.map(m => ({
-      id: m.id as string,
-      name: (m.name || m.id) as string,
-      supportedReasoningEfforts: (m.supportedReasoningEfforts || m.supported_reasoning_efforts) as string[] | undefined,
-      policy: m.policy as { state: string } | undefined,
-      contextWindow: ((m.capabilities as Record<string, unknown>)?.limits as Record<string, unknown>)?.max_context_window_tokens as number | undefined,
-    }));
+    return models.map(m => {
+      const capabilities = m.capabilities as Record<string, unknown> | undefined;
+      const supports = capabilities?.supports as Record<string, unknown> | undefined;
+      return {
+        id: m.id as string,
+        name: (m.name || m.id) as string,
+        supportedReasoningEfforts: (m.supportedReasoningEfforts
+          || m.supported_reasoning_efforts
+          || supports?.reasoning_effort) as string[] | undefined,
+        policy: m.policy as { state: string } | undefined,
+        contextWindow: (capabilities?.limits as Record<string, unknown>)?.max_context_window_tokens as number | undefined,
+        modelPickerEnabled: (m.model_picker_enabled ?? m.modelPickerEnabled) as boolean | undefined,
+        supportsToolCalls: (supports?.tool_calls) as boolean | undefined,
+      };
+    });
   } catch (err) {
     if ((err as Error).name === 'AbortError') {
       throw new Error('Copilot models API timed out');
@@ -102,10 +112,20 @@ async function listModelsViaHttp(
 /** Model ID prefixes to exclude — legacy models that clutter the selector. */
 const EXCLUDED_MODEL_PREFIXES = ['gpt-4', 'gpt-3.5'];
 
-/** Filter raw models to only those explicitly enabled by policy, excluding legacy models. */
+/**
+ * Filter raw models to those the account can actually pick, excluding legacy
+ * models. Mirrors the Pi SDK's own `isSelectableCopilotModel` semantics:
+ * a model is selectable when it is picker-enabled, NOT policy-disabled, and
+ * supports tool calls. Newer models (e.g. gpt-5.6-*) are surfaced by the live
+ * /models API with `policy.state` unset (not "enabled") — requiring a literal
+ * "enabled" state would wrongly hide them, so we only drop explicitly disabled
+ * models.
+ */
 function filterEnabledModels(models: RawCopilotModel[]): RawCopilotModel[] {
   return models.filter(m =>
-    m.policy?.state === 'enabled'
+    m.modelPickerEnabled !== false
+    && m.policy?.state !== 'disabled'
+    && m.supportsToolCalls !== false
     && !EXCLUDED_MODEL_PREFIXES.some(prefix => m.id.startsWith(prefix))
     && !isDeprecatedClaudeOpus46Model(m.id),
   );
